@@ -11,6 +11,71 @@ try{state=JSON.parse(localStorage.getItem('fieldnotes.v1')||'{}')||{}}catch{pers
 function save(){try{localStorage.setItem('fieldnotes.v1',JSON.stringify(state))}catch{persistent=false}}
 const items=n=>data.questions.filter(q=>q.lesson===n);
 const count=qs=>qs.filter(q=>state[q.id]?.result).length;
+let query='';
+const termsOf=()=>query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+const termRe=(terms,flags)=>new RegExp(terms.map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),flags);
+function markify(text,terms){
+ const s=String(text??'');
+ if(!terms.length||!s)return esc(s);
+ const re=termRe(terms,'gi');let out='',last=0,m;
+ while((m=re.exec(s))){
+  if(!m[0].length){re.lastIndex++;continue}
+  out+=esc(s.slice(last,m.index))+'<mark class="hit">'+esc(m[0])+'</mark>';
+  last=m.index+m[0].length;
+ }
+ return out+esc(s.slice(last));
+}
+function excerpt(text,terms,max=520){
+ const s=String(text??'');
+ if(s.length<=max)return markify(s,terms);
+ const m=termRe(terms,'i').exec(s);
+ const start=Math.max(0,(m?m.index:0)-120);
+ return (start>0?'…':'')+markify(s.slice(start,start+max),terms)+(start+max<s.length?'…':'');
+}
+function searchIndex(terms){
+ const groups=[];let paraCount=0;
+ data.lessons.forEach(l=>{
+  const head=[l.title,l.zh,l.headingZh].join(' ').toLowerCase();
+  const titleHit=terms.every(t=>head.includes(t));
+  const secs=[];
+  l.sections.forEach((row,idx)=>{
+   const fields=[['原文 · 标题',row[0]],['原文 · 正文',row[1]],['中文 · 标题',row[2]],['中文 · 译文',row[3]]];
+   if(!terms.every(t=>fields.map(f=>String(f[1]??'')).join('\n').toLowerCase().includes(t)))return;
+   paraCount++;
+   secs.push({idx,shown:fields.filter(f=>terms.some(t=>String(f[1]??'').toLowerCase().includes(t)))});
+  });
+  if(titleHit||secs.length)groups.push({lesson:l,titleHit,secs});
+ });
+ return {groups,paraCount};
+}
+function searchBox(){
+ return '<section class="find"><div class="findlabel">检索知识点 / SEARCH</div><div class="findrow"><input id="q" type="search" autocomplete="off" spellcheck="false" value="'+esc(query)+'" placeholder="输入关键词：integrity、charisma、团队、授权…（空格分隔多个词则需同时命中）"><button type="button" class="findclear">清除</button></div><p class="findhint">在 '+data.lessons.length+' 个单元的讲义正文（英文原文 + 中文译文）与单元标题里检索，命中的文字标红。</p><div class="chips" id="chips"><span>试试</span><button type="button" data-q="integrity">integrity</button><button type="button" data-q="charisma">charisma</button><button type="button" data-q="vision">vision</button><button type="button" data-q="resilience">resilience</button><button type="button" data-q="团队">团队</button><button type="button" data-q="授权">授权</button></div><div id="results" class="results"></div></section>';
+}
+function runSearch(){
+ const box=root.querySelector('#results'),dir=root.querySelector('#directory'),chips=root.querySelector('#chips');
+ if(!box)return;
+ const terms=termsOf();
+ if(!terms.length){box.innerHTML='';if(dir)dir.style.display='';if(chips)chips.style.display='';return}
+ if(dir)dir.style.display='none';
+ const found=searchIndex(terms);
+ if(!found.groups.length){if(chips)chips.style.display='';box.innerHTML='<p class="noresult">没有命中「'+esc(query.trim())+'」。试试下面的关键词，或换英文原词（integrity / charisma / task / vision）。</p>';return}
+ if(chips)chips.style.display='none';
+ box.innerHTML='<div class="searchmeta"><span>命中 <b>'+found.groups.length+'</b> 个单元 · <b>'+found.paraCount+'</b> 处段落</span><span>'+terms.map(t=>'<code>'+esc(t)+'</code>').join(' ')+'</span></div>'+found.groups.map(g=>{
+  const l=g.lesson;
+  return '<article class="hitlesson"><header><div><div class="num">LESSON '+fmt(l.id)+'</div><h3>'+esc(l.title)+'</h3><div class="zh">'+esc(l.zh)+'</div></div><a class="open" href="#/notes/'+l.id+'">打开本课 →</a></header>'+(g.titleHit&&!g.secs.length?'<p class="titlehit">命中单元标题：'+esc(l.headingZh||l.zh)+'</p>':'')+g.secs.map(s=>'<div class="hitpara"><div class="where">'+s.shown.map(f=>f[0]).join(' / ')+'</div>'+s.shown.map(f=>'<p>'+excerpt(f[1],terms)+'</p>').join('')+'</div>').join('')+'</article>';
+ }).join('');
+}
+function wireSearch(){
+ const input=root.querySelector('#q');
+ if(!input)return;
+ let timer;
+ input.addEventListener('input',()=>{query=input.value;clearTimeout(timer);timer=setTimeout(runSearch,150)});
+ const clear=root.querySelector('.findclear');
+ if(clear)clear.addEventListener('click',()=>{query='';input.value='';runSearch();input.focus()});
+ root.querySelectorAll('#chips [data-q]').forEach(b=>b.addEventListener('click',()=>{query=b.dataset.q;input.value=query;runSearch();input.focus()}));
+ input.addEventListener('keydown',e=>{if(e.key==='Escape'){query='';input.value='';runSearch()}});
+ runSearch();
+}
 function artwork(){
  let lines='';
  for(let k=0;k<62;k++){
@@ -22,7 +87,7 @@ function artwork(){
 }
 function tabs(mode,n=''){const tail=n?'/'+n:'';return '<div class="seg"><a class="'+(mode==='notes'?'on':'')+'" href="#/notes'+tail+'">知识点</a><a class="'+(mode==='work'?'on':'')+'" href="#/work'+tail+'">Worksheet</a></div>'}
 function home(mode,landing){
- root.innerHTML=(landing?'<section class="hero">'+artwork()+'<div class="copy"><div class="eyebrow">PSYC 150 · MIDTERM</div><h1>Leadership<br><em>Fieldnotes</em></h1><h2>领导力期中研习室</h2><div class="links"><a class="btn gold" href="#/notes">阅读知识点 ↗</a><a class="btn ghost" href="#/work">练习 Worksheet →</a></div></div></section>':'')+'<div class="sectionhead"><div><div class="kicker">LESSON DIRECTORY</div><h2>课程目录</h2></div>'+tabs(mode)+'</div><div class="stats"><span>'+data.lessons.length+' 个单元</span><span class="track"><i style="width:'+100*count(data.questions)/data.questions.length+'%"></i></span><span>已核对 '+count(data.questions)+' / '+data.questions.length+' 题</span></div><div class="grid">'+data.lessons.map(l=>{const qs=items(l.id);return '<a class="lesson" href="#/'+mode+'/'+l.id+'"><div class="num">LESSON '+fmt(l.id)+'</div><h3>'+esc(l.zh)+'</h3><div class="en">'+esc(l.title)+'</div><div class="low"><span>'+(mode==='work'?'已核对 '+count(qs)+' / '+qs.length+' 题':l.sections.length+' 个知识点')+'</span><span class="go">↗</span></div></a>'}).join('')+'</div>'
+ root.innerHTML=(landing?'<section class="hero">'+artwork()+'<div class="copy"><div class="eyebrow">PSYC 150 · MIDTERM</div><h1>Leadership<br><em>Fieldnotes</em></h1><h2>领导力期中研习室</h2><div class="links"><a class="btn gold" href="#/notes">阅读知识点 ↗</a><a class="btn ghost" href="#/work">练习 Worksheet →</a></div></div></section>':'')+searchBox()+'<div id="directory"><div class="sectionhead"><div><div class="kicker">LESSON DIRECTORY</div><h2>课程目录</h2></div>'+tabs(mode)+'</div><div class="stats"><span>'+data.lessons.length+' 个单元</span><span class="track"><i style="width:'+100*count(data.questions)/data.questions.length+'%"></i></span><span>已核对 '+count(data.questions)+' / '+data.questions.length+' 题</span></div><div class="grid">'+data.lessons.map(l=>{const qs=items(l.id);return '<a class="lesson" href="#/'+mode+'/'+l.id+'"><div class="num">LESSON '+fmt(l.id)+'</div><h3>'+esc(l.zh)+'</h3><div class="en">'+esc(l.title)+'</div><div class="low"><span>'+(mode==='work'?'已核对 '+count(qs)+' / '+qs.length+' 题':l.sections.length+' 个知识点')+'</span><span class="go">↗</span></div></a>'}).join('')+'</div></div>';wireSearch()
 }
 function feedback(r){
  if(!r)return '';const title=r.correct===null?'Reference answer · Self-check':r.correct?'Correct':'Incorrect · Review the answer';
