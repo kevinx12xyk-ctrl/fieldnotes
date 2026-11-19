@@ -3,6 +3,9 @@ let KEYS={};
 function loadKeys(file){const bin=atob(file.p||'');const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));const raw=JSON.parse(new TextDecoder().decode(bytes));for(const id of Object.keys(raw)){const k=raw[id];KEYS[id]={correct:k.correct,reference:k.reference,source:k.source}}}
 function checkAnswer(id,value){if(typeof value!=='string'||!value.trim()||value.length>12000)return null;const k=KEYS[id];if(!k)return null;const q=((data&&data.questions)||[]).find(x=>x.id===id);if(k.correct!==null){if(!q||!q.options.some((_,i)=>String(i)===value))return null;const reference=(typeof k.reference==='string'&&k.reference.length<=2&&q)?q.options[k.correct]:k.reference;return{correct:String(k.correct)===value,reference,source:k.source}}return{correct:null,reference:k.reference,source:k.source}}
 
+const themeToggle=document.querySelector('#theme-toggle');
+themeToggle.checked=document.documentElement.dataset.theme==='dark';
+themeToggle.addEventListener('change',()=>{const dark=themeToggle.checked;if(dark)document.documentElement.dataset.theme='dark';else delete document.documentElement.dataset.theme;try{localStorage.setItem('fieldnotes.theme',dark?'dark':'light')}catch{}});
 const root=document.querySelector('main');
 const fmt=n=>String(n).padStart(2,'0');
 const esc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
